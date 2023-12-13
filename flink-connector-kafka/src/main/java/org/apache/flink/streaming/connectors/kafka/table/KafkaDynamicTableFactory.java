@@ -215,6 +215,9 @@ public class KafkaDynamicTableFactory
 
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
 
+        boolean ignoreParseErrors =
+                tableOptions.getOptional(KafkaConnectorOptions.IGNORE_PARSE_ERRORS).orElse(false);
+
         return createKafkaTableSource(
                 physicalDataType,
                 keyDecodingFormat.orElse(null),
@@ -231,7 +234,8 @@ public class KafkaDynamicTableFactory
                 boundedOptions.boundedMode,
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
-                context.getObjectIdentifier().asSummaryString());
+                context.getObjectIdentifier().asSummaryString(),
+                ignoreParseErrors);
     }
 
     @Override
@@ -395,7 +399,8 @@ public class KafkaDynamicTableFactory
             BoundedMode boundedMode,
             Map<KafkaTopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
-            String tableIdentifier) {
+            String tableIdentifier,
+            boolean ignoreParseErrors) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -413,7 +418,8 @@ public class KafkaDynamicTableFactory
                 specificEndOffsets,
                 endTimestampMillis,
                 false,
-                tableIdentifier);
+                tableIdentifier,
+                ignoreParseErrors);
     }
 
     protected KafkaDynamicSink createKafkaTableSink(

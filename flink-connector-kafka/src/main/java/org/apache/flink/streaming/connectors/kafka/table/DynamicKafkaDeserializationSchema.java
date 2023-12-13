@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.GenericRowData;
@@ -30,9 +31,12 @@ import org.apache.flink.util.Collector;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +45,9 @@ import java.util.List;
 class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<RowData> {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(DynamicKafkaDeserializationSchema.class);
 
     private final @Nullable DeserializationSchema<RowData> keyDeserialization;
 
@@ -56,6 +63,10 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
 
     private final boolean upsertMode;
 
+    private final boolean ignoreParseErrors;
+
+    private Counter ignoredParseErrorsCounter;
+
     DynamicKafkaDeserializationSchema(
             int physicalArity,
             @Nullable DeserializationSchema<RowData> keyDeserialization,
@@ -65,7 +76,8 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             boolean hasMetadata,
             MetadataConverter[] metadataConverters,
             TypeInformation<RowData> producedTypeInfo,
-            boolean upsertMode) {
+            boolean upsertMode,
+            boolean ignoreParseErrors) {
         if (upsertMode) {
             Preconditions.checkArgument(
                     keyDeserialization != null && keyProjection.length > 0,
@@ -84,6 +96,7 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
                         upsertMode);
         this.producedTypeInfo = producedTypeInfo;
         this.upsertMode = upsertMode;
+        this.ignoreParseErrors = ignoreParseErrors;
     }
 
     @Override
@@ -92,6 +105,7 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             keyDeserialization.open(context);
         }
         valueDeserialization.open(context);
+        ignoredParseErrorsCounter = context.getMetricGroup().counter("ignored-parse-errors");
     }
 
     @Override
@@ -104,19 +118,62 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
         throw new IllegalStateException("A collector is required for deserializing.");
     }
 
+    /** Returns true if deserialization was success. */
+    private boolean tryDeserializeValue(byte[] value, Collector<RowData> collector)
+            throws IOException {
+        try {
+            valueDeserialization.deserialize(value, collector);
+        } catch (IOException ex) {
+            if (!ignoreParseErrors) {
+                throw ex;
+            }
+
+            if (ignoredParseErrorsCounter != null) {
+                ignoredParseErrorsCounter.inc();
+            }
+            LOG.warn("Ignored parse error for Value: " + ex.getMessage(), ex);
+            return false;
+        }
+        return true;
+    }
+
+    /** Returns true if deserialization was success. */
+    private boolean tryDeserializeKey(byte[] key, BufferingCollector collector) throws IOException {
+        try {
+            if (keyDeserialization != null) {
+                keyDeserialization.deserialize(key, collector);
+            }
+        } catch (IOException ex) {
+            if (!ignoreParseErrors) {
+                throw ex;
+            }
+
+            if (ignoredParseErrorsCounter != null) {
+                ignoredParseErrorsCounter.inc();
+            }
+            LOG.warn("Ignored parse error for Value: " + ex.getMessage(), ex);
+            return false;
+        }
+        return true;
+    }
+
     @Override
     public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<RowData> collector)
             throws Exception {
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
         if (keyDeserialization == null && !hasMetadata) {
-            valueDeserialization.deserialize(record.value(), collector);
+            tryDeserializeValue(record.value(), collector);
             return;
         }
 
         // buffer key(s)
         if (keyDeserialization != null) {
-            keyDeserialization.deserialize(record.key(), keyCollector);
+            boolean isSuccess = tryDeserializeKey(record.key(), keyCollector);
+            if (!isSuccess) {
+                keyCollector.buffer.clear();
+                return;
+            }
         }
 
         // project output while emitting values
@@ -127,7 +184,7 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             // collect tombstone messages in upsert mode by hand
             outputCollector.collect(null);
         } else {
-            valueDeserialization.deserialize(record.value(), outputCollector);
+            tryDeserializeValue(record.value(), outputCollector);
         }
         keyCollector.buffer.clear();
     }

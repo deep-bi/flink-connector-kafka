@@ -171,6 +171,8 @@ public class KafkaDynamicSource
 
     protected final String tableIdentifier;
 
+    protected final boolean ignoreParseErrors;
+
     public KafkaDynamicSource(
             DataType physicalDataType,
             @Nullable DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
@@ -188,7 +190,8 @@ public class KafkaDynamicSource
             Map<KafkaTopicPartition, Long> specificBoundedOffsets,
             long boundedTimestampMillis,
             boolean upsertMode,
-            String tableIdentifier) {
+            String tableIdentifier,
+            boolean ignoreParseErrors) {
         // Format attributes
         this.physicalDataType =
                 Preconditions.checkNotNull(
@@ -228,6 +231,7 @@ public class KafkaDynamicSource
         this.boundedTimestampMillis = boundedTimestampMillis;
         this.upsertMode = upsertMode;
         this.tableIdentifier = tableIdentifier;
+        this.ignoreParseErrors = ignoreParseErrors;
     }
 
     @Override
@@ -344,7 +348,8 @@ public class KafkaDynamicSource
                         specificBoundedOffsets,
                         boundedTimestampMillis,
                         upsertMode,
-                        tableIdentifier);
+                        tableIdentifier,
+                        ignoreParseErrors);
         copy.producedDataType = producedDataType;
         copy.metadataKeys = metadataKeys;
         copy.watermarkStrategy = watermarkStrategy;
@@ -409,7 +414,8 @@ public class KafkaDynamicSource
                 boundedTimestampMillis,
                 upsertMode,
                 tableIdentifier,
-                watermarkStrategy);
+                watermarkStrategy,
+                ignoreParseErrors);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -550,7 +556,8 @@ public class KafkaDynamicSource
                 hasMetadata,
                 metadataConverters,
                 producedTypeInfo,
-                upsertMode);
+                upsertMode,
+                ignoreParseErrors);
     }
 
     private @Nullable DeserializationSchema<RowData> createDeserialization(

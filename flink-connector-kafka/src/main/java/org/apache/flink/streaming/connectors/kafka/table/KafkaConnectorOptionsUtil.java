@@ -45,6 +45,8 @@ import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
+import org.slf4j.LoggerFactory;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -90,6 +92,8 @@ class KafkaConnectorOptionsUtil {
 
     // Prefix for Kafka specific properties.
     public static final String PROPERTIES_PREFIX = "properties.";
+
+    public static final String ENV_PREFIX = "env.";
 
     // Other keywords.
     private static final String PARTITION = "partition";
@@ -664,6 +668,57 @@ class KafkaConnectorOptionsUtil {
         if (!configuration.getOptional(subjectOption).isPresent()) {
             configuration.setString(subjectOption, subject);
         }
+    }
+
+    public static DynamicTableFactory.Context readEnvVariables(
+            DynamicTableFactory.Context context) {
+        Map<String, String> tableOptions = context.getCatalogTable().getOptions();
+        Map<String, String> newOptions = new HashMap<>();
+        System.out.println("Copy of table options");
+        tableOptions.keySet().stream()
+                .filter(key -> !key.startsWith(ENV_PREFIX))
+                .forEach(key -> newOptions.put(key, tableOptions.get(key)));
+
+        System.out.println("Putting table options");
+        System.out.println(context.getConfiguration().getClass());
+        LoggerFactory.getLogger(KafkaConnectorOptionsUtil.class).warn("readEnvVariables");
+        tableOptions.keySet().stream()
+                .filter(key -> key.startsWith(ENV_PREFIX))
+                .forEach(
+                        key -> {
+                            String envVarKey = tableOptions.get(key);
+                            String envVarValue = System.getenv(envVarKey);
+                            System.out.println(
+                                    "Key: "
+                                            + key
+                                            + "  envvar key: "
+                                            + envVarKey
+                                            + " value: "
+                                            + envVarValue);
+                            if (envVarValue == null) {
+                                throw new ValidationException(
+                                        String.format(
+                                                "Environment variable %s is not defined.",
+                                                envVarKey));
+                            }
+                            System.out.printf(
+                                    "Environment variable %s is set to %s.%n",
+                                    envVarKey, envVarValue);
+                            String overrideKey = key.substring((ENV_PREFIX).length());
+                            newOptions.put(overrideKey, envVarValue);
+                        });
+
+        System.out.println(newOptions);
+
+        // context.getConfiguration()
+        // build a new context
+        return new FactoryUtil.DefaultDynamicTableContext(
+                context.getObjectIdentifier(),
+                context.getCatalogTable().copy(newOptions),
+                context.getEnrichmentOptions(),
+                Configuration.fromMap(newOptions),
+                context.getClassLoader(),
+                context.isTemporary());
     }
 
     static void validateDeliveryGuarantee(ReadableConfig tableOptions) {

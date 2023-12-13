@@ -52,7 +52,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.DELIVERY_GUARANTEE;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.IGNORE_PARSE_ERRORS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FORMAT;
@@ -101,7 +105,13 @@ public class UpsertKafkaDynamicTableFactory
         options.add(SINK_PARALLELISM);
         options.add(SINK_BUFFER_FLUSH_INTERVAL);
         options.add(SINK_BUFFER_FLUSH_MAX_ROWS);
+        options.add(IGNORE_PARSE_ERRORS);
         return options;
+    }
+
+    @Override
+    public Set<ConfigOption<?>> forwardOptions() {
+        return Stream.of(DELIVERY_GUARANTEE, TRANSACTIONAL_ID_PREFIX).collect(Collectors.toSet());
     }
 
     @Override
@@ -125,6 +135,7 @@ public class UpsertKafkaDynamicTableFactory
         Tuple2<int[], int[]> keyValueProjections =
                 createKeyValueProjections(context.getCatalogTable());
         String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
+        boolean ignoreParseErrors = tableOptions.getOptional(IGNORE_PARSE_ERRORS).orElse(false);
         Properties properties = getKafkaProperties(context.getCatalogTable().getOptions());
         // always use earliest to keep data integrity
         StartupMode earliest = StartupMode.EARLIEST;
@@ -146,7 +157,8 @@ public class UpsertKafkaDynamicTableFactory
                 Collections.emptyMap(),
                 0,
                 true,
-                context.getObjectIdentifier().asSummaryString());
+                context.getObjectIdentifier().asSummaryString(),
+                ignoreParseErrors);
     }
 
     @Override

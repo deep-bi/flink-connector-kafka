@@ -79,6 +79,9 @@ public class KafkaConnectorOptions {
                                             + "appear in the data type for both the key and value format.",
                                     ValueFieldsStrategy.ALL));
 
+    public static final ConfigOption<Boolean> IGNORE_PARSE_ERRORS =
+            ConfigOptions.key("ignore.parse.errors").booleanType().defaultValue(false);
+
     public static final ConfigOption<String> KEY_FIELDS_PREFIX =
             ConfigOptions.key("key.fields-prefix")
                     .stringType()
